@@ -1,7 +1,9 @@
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -15,6 +17,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // src/main.ts
@@ -23,12 +33,14 @@ __export(main_exports, {
   default: () => ObsidianAIPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/settings.ts
+var WHISPER_MODELS = ["turbo", "base", "small", "large"];
 var DEFAULT_SETTINGS = {
   inboxFolder: "inbox",
-  sessionsFolder: "sessions"
+  sessionsFolder: "sessions",
+  whisperModel: "turbo"
 };
 
 // src/SettingsTab.ts
@@ -53,19 +65,101 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Whisper model").setDesc("Larger models are more accurate but slower").addDropdown((drop) => {
+      WHISPER_MODELS.forEach((model) => drop.addOption(model, model));
+      drop.setValue(this.plugin.settings.whisperModel).onChange(async (value) => {
+        this.plugin.settings.whisperModel = value;
+        await this.plugin.saveSettings();
+      });
+    });
+  }
+};
+
+// src/InboxWatcher.ts
+var import_obsidian2 = require("obsidian");
+var import_child_process = require("child_process");
+var import_fs = require("fs");
+var path = __toESM(require("path"));
+var import_util = require("util");
+var execAsync = (0, import_util.promisify)(import_child_process.exec);
+var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac"]);
+var InboxWatcher = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+  }
+  register() {
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("create", (file) => {
+        if (file instanceof import_obsidian2.TFile) {
+          this.handleNewFile(file).catch(
+            (err) => console.error("[obsidian-ai]", err)
+          );
+        }
+      })
+    );
+  }
+  isAudioFile(file) {
+    return AUDIO_EXTENSIONS.has(file.extension.toLowerCase());
+  }
+  isInInbox(file) {
+    const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, "");
+    return file.path.startsWith(inbox + "/");
+  }
+  getVaultPath() {
+    const adapter = this.plugin.app.vault.adapter;
+    if (adapter instanceof import_obsidian2.FileSystemAdapter) {
+      return adapter.getBasePath();
+    }
+    throw new Error("FileSystemAdapter not available");
+  }
+  async handleNewFile(file) {
+    if (!this.isAudioFile(file) || !this.isInInbox(file))
+      return;
+    const vaultPath = this.getVaultPath();
+    const audioPath = path.join(vaultPath, file.path);
+    const date = new Date().toISOString().slice(0, 10);
+    const outputDir = path.join(vaultPath, this.plugin.settings.sessionsFolder, "src");
+    await import_fs.promises.mkdir(outputDir, { recursive: true });
+    new import_obsidian2.Notice(`[AI] Transcribing: ${file.name}...`);
+    console.log(`[obsidian-ai] Transcribing: ${file.path}`);
+    try {
+      const model = this.plugin.settings.whisperModel;
+      await execAsync(`whisper "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`);
+      const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
+      const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
+      const transcript = await import_fs.promises.readFile(whisperOutput, "utf8");
+      const content = [
+        "---",
+        `created: ${date}`,
+        `source: "[[${file.path}]]"`,
+        "---",
+        "",
+        transcript.trim(),
+        ""
+      ].join("\n");
+      await import_fs.promises.writeFile(finalOutput, content, "utf8");
+      await import_fs.promises.unlink(whisperOutput);
+      new import_obsidian2.Notice(`[AI] Done: ${date}-${file.basename}.md`);
+      console.log(`[obsidian-ai] Saved: ${finalOutput}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      new import_obsidian2.Notice(`[AI] Whisper error: ${message}`);
+      console.error("[obsidian-ai] Whisper error:", err);
+    }
   }
 };
 
 // src/main.ts
-var ObsidianAIPlugin = class extends import_obsidian2.Plugin {
+var ObsidianAIPlugin = class extends import_obsidian3.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+    new InboxWatcher(this).register();
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",
       callback: () => {
-        new import_obsidian2.Notice(
+        new import_obsidian3.Notice(
           `Obsidian AI active
 Inbox: ${this.settings.inboxFolder}
 Sessions: ${this.settings.sessionsFolder}`

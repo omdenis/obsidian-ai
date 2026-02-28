@@ -1,6 +1,7 @@
 import { Notice, Plugin } from 'obsidian';
 import { ObsidianAISettings, DEFAULT_SETTINGS } from './settings';
 import { ObsidianAISettingTab } from './SettingsTab';
+import { InboxWatcher } from './InboxWatcher';
 
 export default class ObsidianAIPlugin extends Plugin {
   settings: ObsidianAISettings;
@@ -9,6 +10,8 @@ export default class ObsidianAIPlugin extends Plugin {
     await this.loadSettings();
 
     this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+
+    new InboxWatcher(this).register();
 
     this.addCommand({
       id: 'test-plugin',

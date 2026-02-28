@@ -1,4 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
+import { WHISPER_MODELS } from './settings';
 import type ObsidianAIPlugin from './main';
 
 export class ObsidianAISettingTab extends PluginSettingTab {
@@ -38,5 +39,18 @@ export class ObsidianAISettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName('Whisper model')
+      .setDesc('Larger models are more accurate but slower')
+      .addDropdown(drop => {
+        WHISPER_MODELS.forEach(model => drop.addOption(model, model));
+        drop
+          .setValue(this.plugin.settings.whisperModel)
+          .onChange(async value => {
+            this.plugin.settings.whisperModel = value as typeof WHISPER_MODELS[number];
+            await this.plugin.saveSettings();
+          });
+      });
   }
 }
