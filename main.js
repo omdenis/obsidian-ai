@@ -23,38 +23,16 @@ __export(main_exports, {
   default: () => ObsidianAIPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
+
+// src/settings.ts
 var DEFAULT_SETTINGS = {
   inboxFolder: "inbox",
   sessionsFolder: "sessions"
 };
-var ObsidianAIPlugin = class extends import_obsidian.Plugin {
-  async onload() {
-    await this.loadSettings();
-    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
-    this.addCommand({
-      id: "test-plugin",
-      name: "Test: show plugin status",
-      callback: () => {
-        new import_obsidian.Notice(
-          `Obsidian AI active
-Inbox: ${this.settings.inboxFolder}
-Sessions: ${this.settings.sessionsFolder}`
-        );
-      }
-    });
-    console.log("Obsidian AI plugin loaded");
-  }
-  onunload() {
-    console.log("Obsidian AI plugin unloaded");
-  }
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-  }
-  async saveSettings() {
-    await this.saveData(this.settings);
-  }
-};
+
+// src/SettingsTab.ts
+var import_obsidian = require("obsidian");
 var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -75,5 +53,34 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+  }
+};
+
+// src/main.ts
+var ObsidianAIPlugin = class extends import_obsidian2.Plugin {
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+    this.addCommand({
+      id: "test-plugin",
+      name: "Test: show plugin status",
+      callback: () => {
+        new import_obsidian2.Notice(
+          `Obsidian AI active
+Inbox: ${this.settings.inboxFolder}
+Sessions: ${this.settings.sessionsFolder}`
+        );
+      }
+    });
+    console.log("Obsidian AI plugin loaded");
+  }
+  onunload() {
+    console.log("Obsidian AI plugin unloaded");
+  }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
   }
 };
