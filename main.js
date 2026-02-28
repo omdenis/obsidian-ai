@@ -40,7 +40,8 @@ var WHISPER_MODELS = ["turbo", "base", "small", "large"];
 var DEFAULT_SETTINGS = {
   inboxFolder: "inbox",
   sessionsFolder: "sessions",
-  whisperModel: "turbo"
+  whisperModel: "turbo",
+  whisperPath: "/home/denis/.local/bin/whisper"
 };
 
 // src/SettingsTab.ts
@@ -65,6 +66,12 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Whisper path").setDesc('Full path to the whisper executable (run "which whisper" in terminal to find it)').addText(
+      (text) => text.setPlaceholder("/home/user/.local/bin/whisper").setValue(this.plugin.settings.whisperPath).onChange(async (value) => {
+        this.plugin.settings.whisperPath = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Whisper model").setDesc("Larger models are more accurate but slower").addDropdown((drop) => {
       WHISPER_MODELS.forEach((model) => drop.addOption(model, model));
       drop.setValue(this.plugin.settings.whisperModel).onChange(async (value) => {
@@ -79,6 +86,7 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
 var import_obsidian2 = require("obsidian");
 var import_child_process = require("child_process");
 var import_fs = require("fs");
+var os = __toESM(require("os"));
 var path = __toESM(require("path"));
 var import_util = require("util");
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
@@ -124,7 +132,18 @@ var InboxWatcher = class {
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
     try {
       const model = this.plugin.settings.whisperModel;
-      await execAsync(`whisper "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`);
+      const whisper = this.plugin.settings.whisperPath;
+      const home = os.homedir();
+      const env = {
+        ...process.env,
+        HOME: home,
+        PYTHONUSERBASE: `${home}/.local`,
+        PYTHONNOUSERSITE: ""
+      };
+      await execAsync(
+        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`,
+        { env }
+      );
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
       const transcript = await import_fs.promises.readFile(whisperOutput, "utf8");

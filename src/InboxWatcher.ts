@@ -1,6 +1,7 @@
 import { FileSystemAdapter, Notice, TFile } from 'obsidian';
 import { exec } from 'child_process';
 import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import type ObsidianAIPlugin from './main';
@@ -61,7 +62,18 @@ export class InboxWatcher {
 
     try {
       const model = this.plugin.settings.whisperModel;
-      await execAsync(`whisper "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`);
+      const whisper = this.plugin.settings.whisperPath;
+      const home = os.homedir();
+      const env = {
+        ...process.env,
+        HOME: home,
+        PYTHONUSERBASE: `${home}/.local`,
+        PYTHONNOUSERSITE: '',
+      };
+      await execAsync(
+        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`,
+        { env }
+      );
 
       // whisper saves the file as <basename>.txt — rename to YYYY-MM-DD-<basename>.md
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);

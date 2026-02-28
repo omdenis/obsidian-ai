@@ -41,6 +41,19 @@ export class ObsidianAISettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Whisper path')
+      .setDesc('Full path to the whisper executable (run "which whisper" in terminal to find it)')
+      .addText(text =>
+        text
+          .setPlaceholder('/home/user/.local/bin/whisper')
+          .setValue(this.plugin.settings.whisperPath)
+          .onChange(async value => {
+            this.plugin.settings.whisperPath = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName('Whisper model')
       .setDesc('Larger models are more accurate but slower')
       .addDropdown(drop => {
