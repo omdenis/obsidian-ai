@@ -10,6 +10,11 @@ Obsidian plugin for automatic audio transcription via Whisper.
   pip install openai-whisper
   ```
 
+Set inbox as Obsidian attachments folder
+
+1. `Settings → Files and links → Default location for new attachments` → select `In the folder specified below`
+2. Set the folder to `inbox`
+
 ### Linux: Obsidian installation
 
 On Linux, Obsidian must be installed as **AppImage** (not Flatpak or Snap). Flatpak and Snap run in a sandbox with their own Python, which prevents the plugin from calling host-installed tools like Whisper.
