@@ -86,7 +86,6 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
 var import_obsidian2 = require("obsidian");
 var import_child_process = require("child_process");
 var import_fs = require("fs");
-var os = __toESM(require("os"));
 var path = __toESM(require("path"));
 var import_util = require("util");
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
@@ -133,16 +132,8 @@ var InboxWatcher = class {
     try {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
-      const home = os.homedir();
-      const env = {
-        ...process.env,
-        HOME: home,
-        PYTHONUSERBASE: `${home}/.local`,
-        PYTHONNOUSERSITE: ""
-      };
       await execAsync(
-        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`,
-        { env }
+        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
@@ -183,6 +174,23 @@ var ObsidianAIPlugin = class extends import_obsidian3.Plugin {
 Inbox: ${this.settings.inboxFolder}
 Sessions: ${this.settings.sessionsFolder}`
         );
+      }
+    });
+    this.addCommand({
+      id: "debug-env",
+      name: "Debug: show environment",
+      callback: async () => {
+        const { exec: exec2 } = require("child_process");
+        const { promisify: promisify2 } = require("util");
+        const execAsync2 = promisify2(exec2);
+        try {
+          const { stdout } = await execAsync2('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
+          console.log("[obsidian-ai] env:", stdout);
+          new import_obsidian3.Notice(stdout, 1e4);
+        } catch (err) {
+          console.log("[obsidian-ai] env error:", err.message);
+          new import_obsidian3.Notice(err.message, 1e4);
+        }
       }
     });
     console.log("Obsidian AI plugin loaded");

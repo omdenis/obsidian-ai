@@ -23,6 +23,24 @@ export default class ObsidianAIPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: 'debug-env',
+      name: 'Debug: show environment',
+      callback: async () => {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        try {
+          const { stdout } = await execAsync('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
+          console.log('[obsidian-ai] env:', stdout);
+          new Notice(stdout, 10000);
+        } catch (err: any) {
+          console.log('[obsidian-ai] env error:', err.message);
+          new Notice(err.message, 10000);
+        }
+      },
+    });
+
     console.log('Obsidian AI plugin loaded');
   }
 
