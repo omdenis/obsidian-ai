@@ -4,6 +4,9 @@ Obsidian plugin for automatic audio transcription via Whisper.
 
 ## Requirements
 
+For the best experience, I’d recommend getting Obsidian Sync for $8. It doesn’t have a strict audio file size limit.
+The $4 plan only allows audio files up to 5 MB.
+
 - [Obsidian](https://obsidian.md/) (see Linux installation notes below)
 - [openai-whisper](https://github.com/openai/whisper) installed on the host system:
   ```bash
