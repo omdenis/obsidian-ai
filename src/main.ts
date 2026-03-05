@@ -5,7 +5,7 @@ import { InboxWatcher } from './InboxWatcher';
 import { ClaudeLauncher } from './ClaudeLauncher';
 
 export default class ObsidianAIPlugin extends Plugin {
-  settings: ObsidianAISettings;
+  settings!: ObsidianAISettings;
 
   async onload() {
     await this.loadSettings();

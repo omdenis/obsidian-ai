@@ -63,7 +63,7 @@ export class InboxWatcher {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
       await execAsync(
-        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
+        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
 
       // whisper saves the file as <basename>.txt — rename to YYYY-MM-DD-<basename>.md

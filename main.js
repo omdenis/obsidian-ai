@@ -133,7 +133,7 @@ var InboxWatcher = class {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
       await execAsync(
-        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
+        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
