@@ -2,6 +2,7 @@ import { Notice, Plugin } from 'obsidian';
 import { ObsidianAISettings, DEFAULT_SETTINGS } from './settings';
 import { ObsidianAISettingTab } from './SettingsTab';
 import { InboxWatcher } from './InboxWatcher';
+import { ClaudeLauncher } from './ClaudeLauncher';
 
 export default class ObsidianAIPlugin extends Plugin {
   settings: ObsidianAISettings;
@@ -12,6 +13,8 @@ export default class ObsidianAIPlugin extends Plugin {
     this.addSettingTab(new ObsidianAISettingTab(this.app, this));
 
     new InboxWatcher(this).register();
+
+    new ClaudeLauncher(this).register();
 
     this.addCommand({
       id: 'test-plugin',

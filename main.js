@@ -33,7 +33,7 @@ __export(main_exports, {
   default: () => ObsidianAIPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/settings.ts
 var WHISPER_MODELS = ["turbo", "base", "small", "large"];
@@ -159,17 +159,66 @@ var InboxWatcher = class {
   }
 };
 
+// src/ClaudeLauncher.ts
+var import_obsidian3 = require("obsidian");
+var TERMINALS = [
+  { bin: "xfce4-terminal", args: (cmd, cwd) => ["--default-working-directory", cwd, "-e", cmd] },
+  { bin: "gnome-terminal", args: (cmd, cwd) => ["--working-directory", cwd, "--", "bash", "-c", cmd] },
+  { bin: "konsole", args: (cmd, cwd) => ["--workdir", cwd, "-e", "bash", "-c", cmd] },
+  { bin: "alacritty", args: (cmd, cwd) => ["--working-directory", cwd, "-e", "bash", "-c", cmd] },
+  { bin: "kitty", args: (cmd, cwd) => ["--directory", cwd, "bash", "-c", cmd] },
+  { bin: "xterm", args: (cmd, cwd) => ["-e", `cd ${cwd} && ${cmd}`] }
+];
+var ClaudeLauncher = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+  }
+  register() {
+    this.plugin.addRibbonIcon("terminal", "Launch Claude", () => {
+      this.launch();
+    });
+  }
+  launch() {
+    const { spawn, execSync } = require("child_process");
+    const fs2 = require("fs");
+    const path2 = require("path");
+    const vaultPath = this.plugin.app.vault.adapter.basePath;
+    const claudeMdPath = path2.join(vaultPath, "CLAUDE.md");
+    const hasClaudeMd = fs2.existsSync(claudeMdPath);
+    const claudeCmd = hasClaudeMd ? "claude" : "claude /init";
+    const terminal = TERMINALS.find((t) => {
+      try {
+        execSync(`which ${t.bin}`, { stdio: "ignore" });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    });
+    if (!terminal) {
+      new import_obsidian3.Notice("No supported terminal emulator found");
+      return;
+    }
+    const proc = spawn(terminal.bin, terminal.args(claudeCmd, vaultPath), {
+      detached: true,
+      stdio: "ignore"
+    });
+    proc.unref();
+    new import_obsidian3.Notice(hasClaudeMd ? "Claude launched" : "Claude launched with /init");
+  }
+};
+
 // src/main.ts
-var ObsidianAIPlugin = class extends import_obsidian3.Plugin {
+var ObsidianAIPlugin = class extends import_obsidian4.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new ObsidianAISettingTab(this.app, this));
     new InboxWatcher(this).register();
+    new ClaudeLauncher(this).register();
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",
       callback: () => {
-        new import_obsidian3.Notice(
+        new import_obsidian4.Notice(
           `Obsidian AI active
 Inbox: ${this.settings.inboxFolder}
 Sessions: ${this.settings.sessionsFolder}`
@@ -186,10 +235,10 @@ Sessions: ${this.settings.sessionsFolder}`
         try {
           const { stdout } = await execAsync2('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
           console.log("[obsidian-ai] env:", stdout);
-          new import_obsidian3.Notice(stdout, 1e4);
+          new import_obsidian4.Notice(stdout, 1e4);
         } catch (err) {
           console.log("[obsidian-ai] env error:", err.message);
-          new import_obsidian3.Notice(err.message, 1e4);
+          new import_obsidian4.Notice(err.message, 1e4);
         }
       }
     });
