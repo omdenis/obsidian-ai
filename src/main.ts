@@ -8,13 +8,16 @@ export default class ObsidianAIPlugin extends Plugin {
   settings!: ObsidianAISettings;
 
   async onload() {
-    await this.loadSettings();
-
-    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
-
-    new InboxWatcher(this).register();
-
-    new ClaudeLauncher(this).register();
+    try {
+      await this.loadSettings();
+      this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+      new InboxWatcher(this).register();
+      new ClaudeLauncher(this).register();
+    } catch (err) {
+      console.error('[obsidian-ai] onload error:', err);
+      new Notice(`[obsidian-ai] Failed to load: ${err}`);
+      return;
+    }
 
     this.addCommand({
       id: 'test-plugin',

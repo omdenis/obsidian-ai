@@ -89,7 +89,7 @@ var import_fs = require("fs");
 var path = __toESM(require("path"));
 var import_util = require("util");
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
-var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac"]);
+var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac", "mp4"]);
 var InboxWatcher = class {
   constructor(plugin) {
     this.plugin = plugin;
@@ -210,10 +210,16 @@ var ClaudeLauncher = class {
 // src/main.ts
 var ObsidianAIPlugin = class extends import_obsidian4.Plugin {
   async onload() {
-    await this.loadSettings();
-    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
-    new InboxWatcher(this).register();
-    new ClaudeLauncher(this).register();
+    try {
+      await this.loadSettings();
+      this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+      new InboxWatcher(this).register();
+      new ClaudeLauncher(this).register();
+    } catch (err) {
+      console.error("[obsidian-ai] onload error:", err);
+      new import_obsidian4.Notice(`[obsidian-ai] Failed to load: ${err}`);
+      return;
+    }
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",

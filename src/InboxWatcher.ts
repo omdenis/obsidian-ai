@@ -7,7 +7,7 @@ import type ObsidianAIPlugin from './main';
 
 const execAsync = promisify(exec);
 
-const AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'flac', 'webm', 'aac']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'flac', 'webm', 'aac', 'mp4']);
 
 export class InboxWatcher {
   private plugin: ObsidianAIPlugin;
