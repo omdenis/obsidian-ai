@@ -105,7 +105,7 @@ export class InboxWatcher {
 
       // Upload to Telegram (non-fatal)
       let telegramUrl: string | undefined;
-      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const token = this.plugin.settings.telegramBotToken;
       const tgTarget = parseTelegramThreadUrl(this.plugin.settings.telegramThreadUrl);
       if (token && tgTarget) {
         try {
