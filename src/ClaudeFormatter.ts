@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
 
 const FORMAT_PROMPT = `\
@@ -13,9 +12,9 @@ Rules:
 
 Transcript to format:`;
 
-function runClaude(claudePath: string, input: string): Promise<string> {
+export function formatTranscript(claudePath: string, rawText: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(claudePath, ['--print', FORMAT_PROMPT + '\n\n' + input], {
+    const child = spawn(claudePath, ['--print', FORMAT_PROMPT + '\n\n' + rawText], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -29,18 +28,4 @@ function runClaude(claudePath: string, input: string): Promise<string> {
       else resolve(stdout.trim());
     });
   });
-}
-
-// Rewrites the body of the MD file in-place, preserving frontmatter.
-export async function formatTranscriptFile(claudePath: string, mdFilePath: string): Promise<void> {
-  const original = await fs.readFile(mdFilePath, 'utf8');
-
-  // Split frontmatter from body
-  const match = original.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
-  if (!match) return;
-  const [, frontmatter, body] = match;
-
-  const formatted = await runClaude(claudePath, body.trim());
-
-  await fs.writeFile(mdFilePath, `${frontmatter}\n${formatted}\n`, 'utf8');
 }

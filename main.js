@@ -106,7 +106,7 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
 // src/InboxWatcher.ts
 var import_obsidian2 = require("obsidian");
 var import_child_process2 = require("child_process");
-var import_fs3 = require("fs");
+var import_fs2 = require("fs");
 var path2 = __toESM(require("path"));
 var import_util = require("util");
 
@@ -220,7 +220,6 @@ Content-Type: application/octet-stream\r
 }
 
 // src/ClaudeFormatter.ts
-var import_fs2 = require("fs");
 var import_child_process = require("child_process");
 var FORMAT_PROMPT = `You are formatting a raw voice transcript into a clean Obsidian note.
 
@@ -232,9 +231,9 @@ Rules:
 - Output only the formatted body text, no preamble, no commentary
 
 Transcript to format:`;
-function runClaude(claudePath, input) {
+function formatTranscript(claudePath, rawText) {
   return new Promise((resolve, reject) => {
-    const child = (0, import_child_process.spawn)(claudePath, ["--print", FORMAT_PROMPT + "\n\n" + input], {
+    const child = (0, import_child_process.spawn)(claudePath, ["--print", FORMAT_PROMPT + "\n\n" + rawText], {
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -249,17 +248,6 @@ function runClaude(claudePath, input) {
         resolve(stdout.trim());
     });
   });
-}
-async function formatTranscriptFile(claudePath, mdFilePath) {
-  const original = await import_fs2.promises.readFile(mdFilePath, "utf8");
-  const match = original.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
-  if (!match)
-    return;
-  const [, frontmatter, body] = match;
-  const formatted = await runClaude(claudePath, body.trim());
-  await import_fs2.promises.writeFile(mdFilePath, `${frontmatter}
-${formatted}
-`, "utf8");
 }
 
 // src/InboxWatcher.ts
@@ -319,26 +307,26 @@ var InboxWatcher = class {
     const vaultPath = this.getVaultPath();
     const audioPath = path2.join(vaultPath, file.path);
     const date = new Date().toISOString().slice(0, 10);
-    const outputDir = path2.join(vaultPath, this.plugin.settings.sessionsFolder, "src");
-    await import_fs3.promises.mkdir(outputDir, { recursive: true });
+    const sessions = this.plugin.settings.sessionsFolder;
+    const srcDir = path2.join(vaultPath, sessions, "src");
+    await import_fs2.promises.mkdir(srcDir, { recursive: true });
     new import_obsidian2.Notice(`[AI] Transcribing: ${file.name}...`);
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
     try {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
       await execAsync(
-        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
+        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${srcDir}" --output_format txt`
       );
-      const whisperOutput = path2.join(outputDir, `${file.basename}.txt`);
-      const finalOutput = path2.join(outputDir, `${date}-${file.basename}.md`);
-      const transcript = await import_fs3.promises.readFile(whisperOutput, "utf8");
-      await import_fs3.promises.unlink(whisperOutput);
+      const whisperOutput = path2.join(srcDir, `${file.basename}.txt`);
+      const transcript = await import_fs2.promises.readFile(whisperOutput, "utf8");
+      await import_fs2.promises.unlink(whisperOutput);
       const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, "");
       const doneDir = path2.join(vaultPath, inbox, "done");
-      await import_fs3.promises.mkdir(doneDir, { recursive: true });
+      await import_fs2.promises.mkdir(doneDir, { recursive: true });
       const doneFileName = `${date}-${file.name}`;
       const donePath = path2.join(doneDir, doneFileName);
-      await import_fs3.promises.rename(audioPath, donePath);
+      await import_fs2.promises.rename(audioPath, donePath);
       console.log(`[obsidian-ai] Moved to done: ${doneFileName}`);
       let telegramUrl;
       const token = this.plugin.settings.telegramBotToken;
@@ -354,30 +342,38 @@ var InboxWatcher = class {
           console.error("[obsidian-ai] Telegram error:", tgErr);
         }
       }
+      const srcFileName = `${date}-${file.basename}-src.md`;
+      const srcFilePath = `${sessions}/src/${srcFileName}`;
+      await import_fs2.promises.writeFile(path2.join(srcDir, srcFileName), transcript.trim() + "\n", "utf8");
+      console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
+      const baseName = `${date}-${file.basename}`;
+      const finalOutput = path2.join(vaultPath, sessions, `${baseName}.md`);
+      await import_fs2.promises.mkdir(path2.join(vaultPath, sessions), { recursive: true });
       const doneFilePath = `${inbox}/done/${doneFileName}`;
-      const frontmatter = [
-        "---",
-        `created: ${date}`,
-        `source: "[[${doneFilePath}]]"`,
-        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
-        "---"
-      ];
-      const content = [...frontmatter, "", transcript.trim(), ""].join("\n");
-      await import_fs3.promises.writeFile(finalOutput, content, "utf8");
-      console.log(`[obsidian-ai] Saved: ${finalOutput}`);
       const claudePath = this.plugin.settings.claudePath;
+      let body = transcript.trim();
       if (claudePath) {
         try {
           new import_obsidian2.Notice(`[AI] Formatting with Claude...`);
-          await formatTranscriptFile(claudePath, finalOutput);
-          console.log(`[obsidian-ai] Formatted: ${finalOutput}`);
+          body = await formatTranscript(claudePath, body);
+          console.log(`[obsidian-ai] Formatted: ${baseName}.md`);
         } catch (fmtErr) {
           const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
           new import_obsidian2.Notice(`[AI] Claude format failed: ${msg}`);
           console.error("[obsidian-ai] Claude format error:", fmtErr);
         }
       }
-      new import_obsidian2.Notice(`[AI] Done: ${date}-${file.basename}.md`);
+      const frontmatter = [
+        "---",
+        `created: ${date}`,
+        `audio: "[[${doneFilePath}]]"`,
+        `transcript: "[[${srcFilePath}]]"`,
+        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
+        "---"
+      ];
+      await import_fs2.promises.writeFile(finalOutput, [...frontmatter, "", body, ""].join("\n"), "utf8");
+      console.log(`[obsidian-ai] Saved: ${baseName}.md`);
+      new import_obsidian2.Notice(`[AI] Done: ${baseName}.md`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new import_obsidian2.Notice(`[AI] Whisper error: ${message}`);
@@ -407,11 +403,11 @@ var ClaudeLauncher = class {
   }
   launch() {
     const { spawn: spawn2, execSync } = require("child_process");
-    const fs4 = require("fs");
+    const fs3 = require("fs");
     const path3 = require("path");
     const vaultPath = this.plugin.app.vault.adapter.basePath;
     const claudeMdPath = path3.join(vaultPath, "CLAUDE.md");
-    const hasClaudeMd = fs4.existsSync(claudeMdPath);
+    const hasClaudeMd = fs3.existsSync(claudeMdPath);
     const claudeCmd = hasClaudeMd ? "claude" : "claude /init";
     const terminal = TERMINALS.find((t) => {
       try {

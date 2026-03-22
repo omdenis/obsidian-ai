@@ -5,7 +5,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import type ObsidianAIPlugin from './main';
 import { sendFileToTelegram, parseTelegramThreadUrl } from './TelegramService';
-import { formatTranscriptFile } from './ClaudeFormatter';
+import { formatTranscript } from './ClaudeFormatter';
 
 const execAsync = promisify(exec);
 
@@ -75,9 +75,10 @@ export class InboxWatcher {
     const audioPath = path.join(vaultPath, file.path);
 
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const outputDir = path.join(vaultPath, this.plugin.settings.sessionsFolder, 'src');
+    const sessions = this.plugin.settings.sessionsFolder;
+    const srcDir = path.join(vaultPath, sessions, 'src');
 
-    await fs.mkdir(outputDir, { recursive: true });
+    await fs.mkdir(srcDir, { recursive: true });
 
     new Notice(`[AI] Transcribing: ${file.name}...`);
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
@@ -86,12 +87,11 @@ export class InboxWatcher {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
       await execAsync(
-        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
+        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${srcDir}" --output_format txt`
       );
 
       // whisper saves the file as <basename>.txt
-      const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
-      const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
+      const whisperOutput = path.join(srcDir, `${file.basename}.txt`);
       const transcript = await fs.readFile(whisperOutput, 'utf8');
       await fs.unlink(whisperOutput);
 
@@ -120,27 +120,26 @@ export class InboxWatcher {
         }
       }
 
-      // Write transcript MD
+      // Write raw whisper output as -src.md
+      const srcFileName = `${date}-${file.basename}-src.md`;
+      const srcFilePath = `${sessions}/src/${srcFileName}`;
+      await fs.writeFile(path.join(srcDir, srcFileName), transcript.trim() + '\n', 'utf8');
+      console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
+
+      // Format with Claude and write final MD
+      const baseName = `${date}-${file.basename}`;
+      const finalOutput = path.join(vaultPath, sessions, `${baseName}.md`);
+      await fs.mkdir(path.join(vaultPath, sessions), { recursive: true });
+
       const doneFilePath = `${inbox}/done/${doneFileName}`;
-      const frontmatter = [
-        '---',
-        `created: ${date}`,
-        `source: "[[${doneFilePath}]]"`,
-        ...(telegramUrl ? [`telegram: "${telegramUrl}"`] : []),
-        '---',
-      ];
-      const content = [...frontmatter, '', transcript.trim(), ''].join('\n');
-
-      await fs.writeFile(finalOutput, content, 'utf8');
-      console.log(`[obsidian-ai] Saved: ${finalOutput}`);
-
-      // Format transcript with Claude (non-fatal)
       const claudePath = this.plugin.settings.claudePath;
+
+      let body = transcript.trim();
       if (claudePath) {
         try {
           new Notice(`[AI] Formatting with Claude...`);
-          await formatTranscriptFile(claudePath, finalOutput);
-          console.log(`[obsidian-ai] Formatted: ${finalOutput}`);
+          body = await formatTranscript(claudePath, body);
+          console.log(`[obsidian-ai] Formatted: ${baseName}.md`);
         } catch (fmtErr) {
           const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
           new Notice(`[AI] Claude format failed: ${msg}`);
@@ -148,7 +147,18 @@ export class InboxWatcher {
         }
       }
 
-      new Notice(`[AI] Done: ${date}-${file.basename}.md`);
+      const frontmatter = [
+        '---',
+        `created: ${date}`,
+        `audio: "[[${doneFilePath}]]"`,
+        `transcript: "[[${srcFilePath}]]"`,
+        ...(telegramUrl ? [`telegram: "${telegramUrl}"`] : []),
+        '---',
+      ];
+      await fs.writeFile(finalOutput, [...frontmatter, '', body, ''].join('\n'), 'utf8');
+      console.log(`[obsidian-ai] Saved: ${baseName}.md`);
+
+      new Notice(`[AI] Done: ${baseName}.md`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new Notice(`[AI] Whisper error: ${message}`);
