@@ -92,10 +92,12 @@ export class InboxWatcher {
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
 
       const transcript = await fs.readFile(whisperOutput, 'utf8');
+      const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
+      const doneFilePath = `${inbox}/done/${date}-${file.name}`;
       const content = [
         '---',
         `created: ${date}`,
-        `source: "[[${file.path}]]"`,
+        `source: "[[${doneFilePath}]]"`,
         '---',
         '',
         transcript.trim(),
@@ -112,13 +114,12 @@ export class InboxWatcher {
       new Notice(`[AI] Whisper error: ${message}`);
       console.error('[obsidian-ai] Whisper error:', err);
     } finally {
-      // Move file to inbox/done regardless of success or failure
-      const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
-      const doneDir = path.join(vaultPath, inbox, 'done');
+      // Move file to inbox/done with YYYY-MM-DD prefix
+      const doneDir = path.join(vaultPath, this.plugin.settings.inboxFolder.replace(/\/$/, ''), 'done');
       await fs.mkdir(doneDir, { recursive: true });
-      const destPath = path.join(doneDir, file.name);
+      const destPath = path.join(doneDir, `${date}-${file.name}`);
       await fs.rename(audioPath, destPath);
-      console.log(`[obsidian-ai] Moved to done: ${file.name}`);
+      console.log(`[obsidian-ai] Moved to done: ${date}-${file.name}`);
     }
   }
 }
