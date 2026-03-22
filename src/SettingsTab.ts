@@ -67,6 +67,19 @@ export class ObsidianAISettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName('Claude path')
+      .setDesc('Full path to the claude CLI executable (run "which claude" in terminal)')
+      .addText(text =>
+        text
+          .setPlaceholder('claude')
+          .setValue(this.plugin.settings.claudePath)
+          .onChange(async value => {
+            this.plugin.settings.claudePath = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName('Telegram bot token')
       .setDesc('Bot API token from @BotFather')
       .addText(text =>

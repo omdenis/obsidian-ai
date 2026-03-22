@@ -5,6 +5,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import type ObsidianAIPlugin from './main';
 import { sendFileToTelegram, parseTelegramThreadUrl } from './TelegramService';
+import { formatTranscriptFile } from './ClaudeFormatter';
 
 const execAsync = promisify(exec);
 
@@ -131,8 +132,23 @@ export class InboxWatcher {
       const content = [...frontmatter, '', transcript.trim(), ''].join('\n');
 
       await fs.writeFile(finalOutput, content, 'utf8');
-      new Notice(`[AI] Done: ${date}-${file.basename}.md`);
       console.log(`[obsidian-ai] Saved: ${finalOutput}`);
+
+      // Format transcript with Claude (non-fatal)
+      const claudePath = this.plugin.settings.claudePath;
+      if (claudePath) {
+        try {
+          new Notice(`[AI] Formatting with Claude...`);
+          await formatTranscriptFile(claudePath, finalOutput);
+          console.log(`[obsidian-ai] Formatted: ${finalOutput}`);
+        } catch (fmtErr) {
+          const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
+          new Notice(`[AI] Claude format failed: ${msg}`);
+          console.error('[obsidian-ai] Claude format error:', fmtErr);
+        }
+      }
+
+      new Notice(`[AI] Done: ${date}-${file.basename}.md`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new Notice(`[AI] Whisper error: ${message}`);
