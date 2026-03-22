@@ -12,6 +12,36 @@ export function parseTelegramThreadUrl(url: string): { chatId: string; threadId:
   };
 }
 
+function telegramGet(token: string, method: string, params: Record<string, string>): Promise<any> {
+  const query = new URLSearchParams(params).toString();
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      path: `/bot${token}/${method}?${query}`,
+      method: 'GET',
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Returns the chat title on success, throws on failure.
+export async function checkTelegramAccess(token: string, chatId: string): Promise<string> {
+  const res = await telegramGet(token, 'getChat', { chat_id: chatId });
+  if (!res.ok) throw new Error(res.description ?? 'unknown error');
+  return res.result.title ?? res.result.username ?? chatId;
+}
+
 export async function sendFileToTelegram(
   token: string,
   chatId: string,

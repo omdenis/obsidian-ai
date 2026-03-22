@@ -33,7 +33,7 @@ __export(main_exports, {
   default: () => ObsidianAIPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/settings.ts
 var WHISPER_MODELS = ["turbo", "base", "small", "large"];
@@ -122,6 +122,35 @@ function parseTelegramThreadUrl(url) {
     chatId: `-100${match[1]}`,
     threadId: match[2]
   };
+}
+function telegramGet(token, method, params) {
+  const query = new URLSearchParams(params).toString();
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.telegram.org",
+      path: `/bot${token}/${method}?${query}`,
+      method: "GET"
+    }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+async function checkTelegramAccess(token, chatId) {
+  var _a, _b, _c;
+  const res = await telegramGet(token, "getChat", { chat_id: chatId });
+  if (!res.ok)
+    throw new Error((_a = res.description) != null ? _a : "unknown error");
+  return (_c = (_b = res.result.title) != null ? _b : res.result.username) != null ? _c : chatId;
 }
 async function sendFileToTelegram(token, chatId, threadId, filePath) {
   const fileBuffer = await import_fs.promises.readFile(filePath);
@@ -405,24 +434,72 @@ var ClaudeLauncher = class {
   }
 };
 
+// src/HealthCheck.ts
+var import_obsidian4 = require("obsidian");
+var import_child_process3 = require("child_process");
+var import_util2 = require("util");
+var execAsync2 = (0, import_util2.promisify)(import_child_process3.exec);
+async function checkExecutable(bin) {
+  try {
+    const { stdout } = await execAsync2(`"${bin}" --version`);
+    return stdout.trim().split("\n")[0];
+  } catch (e) {
+    return null;
+  }
+}
+async function runHealthCheck(plugin) {
+  const failures = [];
+  const whisperVersion = await checkExecutable(plugin.settings.whisperPath);
+  if (whisperVersion) {
+    console.log(`[obsidian-ai] whisper ok: ${whisperVersion}`);
+  } else {
+    failures.push(`whisper not found at: ${plugin.settings.whisperPath}`);
+  }
+  const claudeVersion = await checkExecutable(plugin.settings.claudePath);
+  if (claudeVersion) {
+    console.log(`[obsidian-ai] claude ok: ${claudeVersion}`);
+  } else {
+    failures.push(`claude not found at: ${plugin.settings.claudePath}`);
+  }
+  const token = plugin.settings.telegramBotToken;
+  const tgTarget = parseTelegramThreadUrl(plugin.settings.telegramThreadUrl);
+  if (token && tgTarget) {
+    try {
+      const title = await checkTelegramAccess(token, tgTarget.chatId);
+      console.log(`[obsidian-ai] telegram ok: ${title}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      failures.push(`telegram: ${msg}`);
+    }
+  }
+  if (failures.length > 0) {
+    const msg = "[AI] Health check failed:\n" + failures.map((f) => `\u2022 ${f}`).join("\n");
+    new import_obsidian4.Notice(msg, 1e4);
+    console.warn("[obsidian-ai]", msg);
+  } else {
+    new import_obsidian4.Notice("[AI] All tools available", 4e3);
+  }
+}
+
 // src/main.ts
-var ObsidianAIPlugin = class extends import_obsidian4.Plugin {
+var ObsidianAIPlugin = class extends import_obsidian5.Plugin {
   async onload() {
     try {
       await this.loadSettings();
       this.addSettingTab(new ObsidianAISettingTab(this.app, this));
       new InboxWatcher(this).register();
       new ClaudeLauncher(this).register();
+      runHealthCheck(this).catch((err) => console.error("[obsidian-ai] healthcheck error:", err));
     } catch (err) {
       console.error("[obsidian-ai] onload error:", err);
-      new import_obsidian4.Notice(`[obsidian-ai] Failed to load: ${err}`);
+      new import_obsidian5.Notice(`[obsidian-ai] Failed to load: ${err}`);
       return;
     }
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",
       callback: () => {
-        new import_obsidian4.Notice(
+        new import_obsidian5.Notice(
           `Obsidian AI active
 Inbox: ${this.settings.inboxFolder}
 Sessions: ${this.settings.sessionsFolder}`
@@ -433,16 +510,16 @@ Sessions: ${this.settings.sessionsFolder}`
       id: "debug-env",
       name: "Debug: show environment",
       callback: async () => {
-        const { exec: exec2 } = require("child_process");
-        const { promisify: promisify2 } = require("util");
-        const execAsync2 = promisify2(exec2);
+        const { exec: exec3 } = require("child_process");
+        const { promisify: promisify3 } = require("util");
+        const execAsync3 = promisify3(exec3);
         try {
-          const { stdout } = await execAsync2('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
+          const { stdout } = await execAsync3('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
           console.log("[obsidian-ai] env:", stdout);
-          new import_obsidian4.Notice(stdout, 1e4);
+          new import_obsidian5.Notice(stdout, 1e4);
         } catch (err) {
           console.log("[obsidian-ai] env error:", err.message);
-          new import_obsidian4.Notice(err.message, 1e4);
+          new import_obsidian5.Notice(err.message, 1e4);
         }
       }
     });
