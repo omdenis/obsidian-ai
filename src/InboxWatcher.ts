@@ -11,6 +11,8 @@ const AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'flac', 'webm', 'a
 
 export class InboxWatcher {
   private plugin: ObsidianAIPlugin;
+  private queue: TFile[] = [];
+  private processing = false;
 
   constructor(plugin: ObsidianAIPlugin) {
     this.plugin = plugin;
@@ -20,21 +22,41 @@ export class InboxWatcher {
     this.plugin.registerEvent(
       this.plugin.app.vault.on('create', (file) => {
         if (file instanceof TFile) {
-          this.handleNewFile(file).catch(err =>
-            console.error('[obsidian-ai]', err)
-          );
+          this.enqueue(file);
         }
       })
     );
+  }
+
+  private enqueue(file: TFile) {
+    if (!this.isAudioFile(file) || !this.isDirectlyInInbox(file)) return;
+    this.queue.push(file);
+    if (!this.processing) this.processNext();
+  }
+
+  private async processNext() {
+    if (this.queue.length === 0) {
+      this.processing = false;
+      return;
+    }
+    this.processing = true;
+    const file = this.queue.shift()!;
+    try {
+      await this.handleNewFile(file);
+    } catch (err) {
+      console.error('[obsidian-ai]', err);
+    }
+    this.processNext();
   }
 
   private isAudioFile(file: TFile): boolean {
     return AUDIO_EXTENSIONS.has(file.extension.toLowerCase());
   }
 
-  private isInInbox(file: TFile): boolean {
+  private isDirectlyInInbox(file: TFile): boolean {
     const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
-    return file.path.startsWith(inbox + '/');
+    // Only files directly in inbox/, not in subfolders like inbox/done/
+    return path.dirname(file.path) === inbox;
   }
 
   private getVaultPath(): string {
@@ -46,7 +68,6 @@ export class InboxWatcher {
   }
 
   private async handleNewFile(file: TFile): Promise<void> {
-    if (!this.isAudioFile(file) || !this.isInInbox(file)) return;
 
     const vaultPath = this.getVaultPath();
     const audioPath = path.join(vaultPath, file.path);
@@ -90,6 +111,14 @@ export class InboxWatcher {
       const message = err instanceof Error ? err.message : String(err);
       new Notice(`[AI] Whisper error: ${message}`);
       console.error('[obsidian-ai] Whisper error:', err);
+    } finally {
+      // Move file to inbox/done regardless of success or failure
+      const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
+      const doneDir = path.join(vaultPath, inbox, 'done');
+      await fs.mkdir(doneDir, { recursive: true });
+      const destPath = path.join(doneDir, file.name);
+      await fs.rename(audioPath, destPath);
+      console.log(`[obsidian-ai] Moved to done: ${file.name}`);
     }
   }
 }

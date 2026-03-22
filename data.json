@@ -2,5 +2,5 @@
   "inboxFolder": "inbox",
   "sessionsFolder": "sessions",
   "whisperModel": "turbo",
-  "whisperPath": "/home/denis/.local/bin/whisper"
+  "whisperPath": "whisper"
 }

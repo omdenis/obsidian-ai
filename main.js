@@ -33,7 +33,7 @@ __export(main_exports, {
   default: () => ObsidianAIPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/settings.ts
 var WHISPER_MODELS = ["turbo", "base", "small", "large"];
@@ -89,7 +89,7 @@ var import_fs = require("fs");
 var path = __toESM(require("path"));
 var import_util = require("util");
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
-var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac", "mp4"]);
+var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac"]);
 var InboxWatcher = class {
   constructor(plugin) {
     this.plugin = plugin;
@@ -133,7 +133,7 @@ var InboxWatcher = class {
       const model = this.plugin.settings.whisperModel;
       const whisper = this.plugin.settings.whisperPath;
       await execAsync(
-        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
+        `"${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
@@ -159,72 +159,17 @@ var InboxWatcher = class {
   }
 };
 
-// src/ClaudeLauncher.ts
-var import_obsidian3 = require("obsidian");
-var TERMINALS = [
-  { bin: "xfce4-terminal", args: (cmd, cwd) => ["--default-working-directory", cwd, "-e", cmd] },
-  { bin: "gnome-terminal", args: (cmd, cwd) => ["--working-directory", cwd, "--", "bash", "-c", cmd] },
-  { bin: "konsole", args: (cmd, cwd) => ["--workdir", cwd, "-e", "bash", "-c", cmd] },
-  { bin: "alacritty", args: (cmd, cwd) => ["--working-directory", cwd, "-e", "bash", "-c", cmd] },
-  { bin: "kitty", args: (cmd, cwd) => ["--directory", cwd, "bash", "-c", cmd] },
-  { bin: "xterm", args: (cmd, cwd) => ["-e", `cd ${cwd} && ${cmd}`] }
-];
-var ClaudeLauncher = class {
-  constructor(plugin) {
-    this.plugin = plugin;
-  }
-  register() {
-    this.plugin.addRibbonIcon("terminal", "Launch Claude", () => {
-      this.launch();
-    });
-  }
-  launch() {
-    const { spawn, execSync } = require("child_process");
-    const fs2 = require("fs");
-    const path2 = require("path");
-    const vaultPath = this.plugin.app.vault.adapter.basePath;
-    const claudeMdPath = path2.join(vaultPath, "CLAUDE.md");
-    const hasClaudeMd = fs2.existsSync(claudeMdPath);
-    const claudeCmd = hasClaudeMd ? "claude" : "claude /init";
-    const terminal = TERMINALS.find((t) => {
-      try {
-        execSync(`which ${t.bin}`, { stdio: "ignore" });
-        return true;
-      } catch (e) {
-        return false;
-      }
-    });
-    if (!terminal) {
-      new import_obsidian3.Notice("No supported terminal emulator found");
-      return;
-    }
-    const proc = spawn(terminal.bin, terminal.args(claudeCmd, vaultPath), {
-      detached: true,
-      stdio: "ignore"
-    });
-    proc.unref();
-    new import_obsidian3.Notice(hasClaudeMd ? "Claude launched" : "Claude launched with /init");
-  }
-};
-
 // src/main.ts
-var ObsidianAIPlugin = class extends import_obsidian4.Plugin {
+var ObsidianAIPlugin = class extends import_obsidian3.Plugin {
   async onload() {
-    try {
-      await this.loadSettings();
-      this.addSettingTab(new ObsidianAISettingTab(this.app, this));
-      new InboxWatcher(this).register();
-      new ClaudeLauncher(this).register();
-    } catch (err) {
-      console.error("[obsidian-ai] onload error:", err);
-      new import_obsidian4.Notice(`[obsidian-ai] Failed to load: ${err}`);
-      return;
-    }
+    await this.loadSettings();
+    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+    new InboxWatcher(this).register();
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",
       callback: () => {
-        new import_obsidian4.Notice(
+        new import_obsidian3.Notice(
           `Obsidian AI active
 Inbox: ${this.settings.inboxFolder}
 Sessions: ${this.settings.sessionsFolder}`
@@ -241,10 +186,10 @@ Sessions: ${this.settings.sessionsFolder}`
         try {
           const { stdout } = await execAsync2('python3 --version && which python3 && python3 -c "import sys; print(sys.path)"');
           console.log("[obsidian-ai] env:", stdout);
-          new import_obsidian4.Notice(stdout, 1e4);
+          new import_obsidian3.Notice(stdout, 1e4);
         } catch (err) {
           console.log("[obsidian-ai] env error:", err.message);
-          new import_obsidian4.Notice(err.message, 1e4);
+          new import_obsidian3.Notice(err.message, 1e4);
         }
       }
     });
