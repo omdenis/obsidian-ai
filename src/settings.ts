@@ -9,6 +9,7 @@ export interface ObsidianAISettings {
   whisperPath: string;
   telegramThreadUrl: string;
   telegramBotToken: string;
+  claudePath: string;
 }
 
 export const DEFAULT_SETTINGS: ObsidianAISettings = {
@@ -18,4 +19,5 @@ export const DEFAULT_SETTINGS: ObsidianAISettings = {
   whisperPath: 'whisper',
   telegramThreadUrl: '',
   telegramBotToken: '',
+  claudePath: 'claude',
 };

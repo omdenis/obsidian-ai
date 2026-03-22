@@ -3,6 +3,7 @@ import { ObsidianAISettings, DEFAULT_SETTINGS } from './settings';
 import { ObsidianAISettingTab } from './SettingsTab';
 import { InboxWatcher } from './InboxWatcher';
 import { ClaudeLauncher } from './ClaudeLauncher';
+import { runHealthCheck } from './HealthCheck';
 
 export default class ObsidianAIPlugin extends Plugin {
   settings!: ObsidianAISettings;
@@ -13,6 +14,7 @@ export default class ObsidianAIPlugin extends Plugin {
       this.addSettingTab(new ObsidianAISettingTab(this.app, this));
       new InboxWatcher(this).register();
       new ClaudeLauncher(this).register();
+      runHealthCheck(this).catch(err => console.error('[obsidian-ai] healthcheck error:', err));
     } catch (err) {
       console.error('[obsidian-ai] onload error:', err);
       new Notice(`[obsidian-ai] Failed to load: ${err}`);
