@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import type ObsidianAIPlugin from './main';
+import { sendFileToTelegram, parseTelegramThreadUrl } from './TelegramService';
 
 const execAsync = promisify(exec);
 
@@ -87,39 +88,55 @@ export class InboxWatcher {
         `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
 
-      // whisper saves the file as <basename>.txt — rename to YYYY-MM-DD-<basename>.md
+      // whisper saves the file as <basename>.txt
       const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
       const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
-
       const transcript = await fs.readFile(whisperOutput, 'utf8');
+      await fs.unlink(whisperOutput);
+
+      // Move audio to inbox/done with YYYY-MM-DD prefix
       const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
-      const doneFilePath = `${inbox}/done/${date}-${file.name}`;
-      const content = [
+      const doneDir = path.join(vaultPath, inbox, 'done');
+      await fs.mkdir(doneDir, { recursive: true });
+      const doneFileName = `${date}-${file.name}`;
+      const donePath = path.join(doneDir, doneFileName);
+      await fs.rename(audioPath, donePath);
+      console.log(`[obsidian-ai] Moved to done: ${doneFileName}`);
+
+      // Upload to Telegram (non-fatal)
+      let telegramUrl: string | undefined;
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const tgTarget = parseTelegramThreadUrl(this.plugin.settings.telegramThreadUrl);
+      if (token && tgTarget) {
+        try {
+          telegramUrl = await sendFileToTelegram(token, tgTarget.chatId, tgTarget.threadId, donePath);
+          new Notice(`[AI] Uploaded to Telegram: ${doneFileName}`);
+          console.log(`[obsidian-ai] Telegram message: ${telegramUrl}`);
+        } catch (tgErr) {
+          const msg = tgErr instanceof Error ? tgErr.message : String(tgErr);
+          new Notice(`[AI] Telegram upload failed: ${msg}`);
+          console.error('[obsidian-ai] Telegram error:', tgErr);
+        }
+      }
+
+      // Write transcript MD
+      const doneFilePath = `${inbox}/done/${doneFileName}`;
+      const frontmatter = [
         '---',
         `created: ${date}`,
         `source: "[[${doneFilePath}]]"`,
+        ...(telegramUrl ? [`telegram: "${telegramUrl}"`] : []),
         '---',
-        '',
-        transcript.trim(),
-        '',
-      ].join('\n');
+      ];
+      const content = [...frontmatter, '', transcript.trim(), ''].join('\n');
 
       await fs.writeFile(finalOutput, content, 'utf8');
-      await fs.unlink(whisperOutput);
-
       new Notice(`[AI] Done: ${date}-${file.basename}.md`);
       console.log(`[obsidian-ai] Saved: ${finalOutput}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new Notice(`[AI] Whisper error: ${message}`);
       console.error('[obsidian-ai] Whisper error:', err);
-    } finally {
-      // Move file to inbox/done with YYYY-MM-DD prefix
-      const doneDir = path.join(vaultPath, this.plugin.settings.inboxFolder.replace(/\/$/, ''), 'done');
-      await fs.mkdir(doneDir, { recursive: true });
-      const destPath = path.join(doneDir, `${date}-${file.name}`);
-      await fs.rename(audioPath, destPath);
-      console.log(`[obsidian-ai] Moved to done: ${date}-${file.name}`);
     }
   }
 }
