@@ -9,9 +9,15 @@ const execAsync = promisify(exec);
 async function checkExecutable(bin: string): Promise<string | null> {
   try {
     const { stdout } = await execAsync(`"${bin}" --version`);
-    return stdout.trim().split('\n')[0];
-  } catch {
-    return null;
+    return stdout.trim().split('\n')[0] || bin;
+  } catch (err: any) {
+    // ENOENT means the binary doesn't exist at all
+    if (err?.code === 'ENOENT' || err?.message?.includes('not found') || err?.message?.includes('No such file')) {
+      return null;
+    }
+    // Non-zero exit (e.g. whisper has no --version flag) still means binary exists
+    const out = (err?.stdout || err?.stderr || '').trim().split('\n')[0];
+    return out || bin;
   }
 }
 

@@ -344,12 +344,20 @@ var InboxWatcher = class {
       }
       const srcFileName = `${date}-${file.basename}-src.md`;
       const srcFilePath = `${sessions}/src/${srcFileName}`;
-      await import_fs2.promises.writeFile(path2.join(srcDir, srcFileName), transcript.trim() + "\n", "utf8");
+      const doneFilePath = `${inbox}/done/${doneFileName}`;
+      const srcFrontmatter = [
+        "---",
+        `created: ${date}`,
+        `type: session-src`,
+        `audio: "[[${doneFilePath}]]"`,
+        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
+        "---"
+      ];
+      await import_fs2.promises.writeFile(path2.join(srcDir, srcFileName), [...srcFrontmatter, "", transcript.trim(), ""].join("\n"), "utf8");
       console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
       const baseName = `${date}-${file.basename}`;
       const finalOutput = path2.join(vaultPath, sessions, `${baseName}.md`);
       await import_fs2.promises.mkdir(path2.join(vaultPath, sessions), { recursive: true });
-      const doneFilePath = `${inbox}/done/${doneFileName}`;
       const claudePath = this.plugin.settings.claudePath;
       let body = transcript.trim();
       if (claudePath) {
@@ -366,6 +374,8 @@ var InboxWatcher = class {
       const frontmatter = [
         "---",
         `created: ${date}`,
+        `type: session`,
+        `tags: [session]`,
         `audio: "[[${doneFilePath}]]"`,
         `transcript: "[[${srcFilePath}]]"`,
         ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
@@ -436,11 +446,16 @@ var import_child_process3 = require("child_process");
 var import_util2 = require("util");
 var execAsync2 = (0, import_util2.promisify)(import_child_process3.exec);
 async function checkExecutable(bin) {
+  var _a, _b;
   try {
     const { stdout } = await execAsync2(`"${bin}" --version`);
-    return stdout.trim().split("\n")[0];
-  } catch (e) {
-    return null;
+    return stdout.trim().split("\n")[0] || bin;
+  } catch (err) {
+    if ((err == null ? void 0 : err.code) === "ENOENT" || ((_a = err == null ? void 0 : err.message) == null ? void 0 : _a.includes("not found")) || ((_b = err == null ? void 0 : err.message) == null ? void 0 : _b.includes("No such file"))) {
+      return null;
+    }
+    const out = ((err == null ? void 0 : err.stdout) || (err == null ? void 0 : err.stderr) || "").trim().split("\n")[0];
+    return out || bin;
   }
 }
 async function runHealthCheck(plugin) {

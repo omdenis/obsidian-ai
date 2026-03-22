@@ -123,7 +123,16 @@ export class InboxWatcher {
       // Write raw whisper output as -src.md
       const srcFileName = `${date}-${file.basename}-src.md`;
       const srcFilePath = `${sessions}/src/${srcFileName}`;
-      await fs.writeFile(path.join(srcDir, srcFileName), transcript.trim() + '\n', 'utf8');
+      const doneFilePath = `${inbox}/done/${doneFileName}`;
+      const srcFrontmatter = [
+        '---',
+        `created: ${date}`,
+        `type: session-src`,
+        `audio: "[[${doneFilePath}]]"`,
+        ...(telegramUrl ? [`telegram: "${telegramUrl}"`] : []),
+        '---',
+      ];
+      await fs.writeFile(path.join(srcDir, srcFileName), [...srcFrontmatter, '', transcript.trim(), ''].join('\n'), 'utf8');
       console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
 
       // Format with Claude and write final MD
@@ -131,7 +140,6 @@ export class InboxWatcher {
       const finalOutput = path.join(vaultPath, sessions, `${baseName}.md`);
       await fs.mkdir(path.join(vaultPath, sessions), { recursive: true });
 
-      const doneFilePath = `${inbox}/done/${doneFileName}`;
       const claudePath = this.plugin.settings.claudePath;
 
       let body = transcript.trim();
@@ -150,6 +158,8 @@ export class InboxWatcher {
       const frontmatter = [
         '---',
         `created: ${date}`,
+        `type: session`,
+        `tags: [session]`,
         `audio: "[[${doneFilePath}]]"`,
         `transcript: "[[${srcFilePath}]]"`,
         ...(telegramUrl ? [`telegram: "${telegramUrl}"`] : []),
