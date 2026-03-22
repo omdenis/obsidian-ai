@@ -11,6 +11,51 @@ const execAsync = promisify(exec);
 
 const AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'flac', 'webm', 'aac', 'mp4']);
 
+interface TranscriptionStats {
+  fileName: string;
+  sizeMB: string;
+  duration?: string;
+  processingTime: string;
+  characters: number;
+  words: number;
+  lines: number;
+  model: string;
+  language: string;
+}
+
+function formatSeconds(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+async function getMediaDuration(filePath: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    const seconds = parseFloat(stdout.trim());
+    return isNaN(seconds) ? undefined : formatSeconds(seconds);
+  } catch {
+    return undefined;
+  }
+}
+
+function renderStatsBlock(stats: TranscriptionStats): string {
+  const lines = [
+    '## Transcription Statistics',
+    `* File: ${stats.fileName}`,
+    `* Size: ${stats.sizeMB}`,
+    ...(stats.duration ? [`* Media duration: ${stats.duration}`] : []),
+    `* Processing time: ${stats.processingTime}`,
+    `* Output: ${stats.characters.toLocaleString()} characters, ${stats.words.toLocaleString()} words, ${stats.lines} lines`,
+    `* Model: ${stats.model}`,
+    `* Language: ${stats.language}`,
+  ];
+  return lines.join('\n');
+}
+
 export class InboxWatcher {
   private plugin: ObsidianAIPlugin;
   private queue: TFile[] = [];
@@ -31,8 +76,7 @@ export class InboxWatcher {
   }
 
   private enqueue(file: TFile) {
-    const inInbox = this.isDirectlyInInbox(file);
-    if (!inInbox) return;
+    if (!this.isDirectlyInInbox(file)) return;
     if (!this.isAudioFile(file) && file.extension.toLowerCase() !== 'md') return;
     this.queue.push(file);
     if (!this.processing) this.processNext();
@@ -87,13 +131,38 @@ export class InboxWatcher {
 
     try {
       const { whisperPath, whisperModel } = this.plugin.settings;
-      await execAsync(
+
+      // Collect stats: file size and media duration before moving
+      const stat = await fs.stat(audioPath);
+      const sizeMB = `${(stat.size / (1024 * 1024)).toFixed(2)} MB`;
+      const duration = await getMediaDuration(audioPath);
+
+      // Run whisper, measure processing time
+      const startTime = Date.now();
+      const { stderr } = await execAsync(
         `nice -n 10 "${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
       );
+      const processingTime = formatSeconds((Date.now() - startTime) / 1000);
+
+      // Parse language from whisper stderr
+      const langMatch = stderr.match(/Detected language:\s*(\w+)/i);
+      const language = langMatch ? langMatch[1].toLowerCase() : 'unknown';
 
       const whisperOutput = path.join(srcDir, `${file.basename}.txt`);
-      const transcript = await fs.readFile(whisperOutput, 'utf8');
+      const transcript = (await fs.readFile(whisperOutput, 'utf8')).trim();
       await fs.unlink(whisperOutput);
+
+      const stats: TranscriptionStats = {
+        fileName: file.name,
+        sizeMB,
+        duration,
+        processingTime,
+        characters: transcript.length,
+        words: transcript.split(/\s+/).filter(Boolean).length,
+        lines: transcript.split('\n').length,
+        model: whisperModel,
+        language,
+      };
 
       // Move audio to inbox/done
       const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, '');
@@ -121,7 +190,7 @@ export class InboxWatcher {
       }
 
       const audioRef = `${inbox}/done/${doneFileName}`;
-      await this.saveSession(transcript.trim(), file.basename, date, sessions, vaultPath, { audioRef, telegramUrl });
+      await this.saveSession(transcript, file.basename, date, sessions, vaultPath, { audioRef, telegramUrl, stats });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new Notice(`[AI] Whisper error: ${message}`);
@@ -167,16 +236,16 @@ export class InboxWatcher {
     date: string,
     sessions: string,
     vaultPath: string,
-    opts: { audioRef?: string; telegramUrl?: string }
+    opts: { audioRef?: string; telegramUrl?: string; stats?: TranscriptionStats }
   ): Promise<void> {
     const srcDir = path.join(vaultPath, sessions, 'src');
     const srcFileName = `${date}-${basename}-src.md`;
     const srcFilePath = `${sessions}/src/${srcFileName}`;
-
-    // Write -src.md (only if not already moved there by handleMdFile)
     const srcDest = path.join(srcDir, srcFileName);
+
     const srcExists = await fs.access(srcDest).then(() => true).catch(() => false);
     if (!srcExists) {
+      // Audio path: write fresh -src.md with stats block
       const srcFrontmatter = [
         '---',
         `created: ${date}`,
@@ -185,10 +254,11 @@ export class InboxWatcher {
         ...(opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : []),
         '---',
       ];
-      await fs.writeFile(srcDest, [...srcFrontmatter, '', transcript, ''].join('\n'), 'utf8');
+      const statsBlock = opts.stats ? [renderStatsBlock(opts.stats), ''] : [];
+      await fs.writeFile(srcDest, [...srcFrontmatter, '', ...statsBlock, transcript, ''].join('\n'), 'utf8');
       console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
     } else {
-      // MD file was already moved there — prepend frontmatter
+      // MD path: file was already moved there — prepend frontmatter only
       const srcFrontmatter = [
         '---',
         `created: ${date}`,

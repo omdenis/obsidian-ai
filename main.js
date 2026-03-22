@@ -253,6 +253,36 @@ function formatTranscript(claudePath, rawText) {
 // src/InboxWatcher.ts
 var execAsync = (0, import_util.promisify)(import_child_process2.exec);
 var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac", "mp4"]);
+function formatSeconds(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor(totalSeconds % 3600 / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+async function getMediaDuration(filePath) {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    const seconds = parseFloat(stdout.trim());
+    return isNaN(seconds) ? void 0 : formatSeconds(seconds);
+  } catch (e) {
+    return void 0;
+  }
+}
+function renderStatsBlock(stats) {
+  const lines = [
+    "## Transcription Statistics",
+    `* File: ${stats.fileName}`,
+    `* Size: ${stats.sizeMB}`,
+    ...stats.duration ? [`* Media duration: ${stats.duration}`] : [],
+    `* Processing time: ${stats.processingTime}`,
+    `* Output: ${stats.characters.toLocaleString()} characters, ${stats.words.toLocaleString()} words, ${stats.lines} lines`,
+    `* Model: ${stats.model}`,
+    `* Language: ${stats.language}`
+  ];
+  return lines.join("\n");
+}
 var InboxWatcher = class {
   constructor(plugin) {
     this.queue = [];
@@ -269,8 +299,7 @@ var InboxWatcher = class {
     );
   }
   enqueue(file) {
-    const inInbox = this.isDirectlyInInbox(file);
-    if (!inInbox)
+    if (!this.isDirectlyInInbox(file))
       return;
     if (!this.isAudioFile(file) && file.extension.toLowerCase() !== "md")
       return;
@@ -321,12 +350,30 @@ var InboxWatcher = class {
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
     try {
       const { whisperPath, whisperModel } = this.plugin.settings;
-      await execAsync(
+      const stat = await import_fs2.promises.stat(audioPath);
+      const sizeMB = `${(stat.size / (1024 * 1024)).toFixed(2)} MB`;
+      const duration = await getMediaDuration(audioPath);
+      const startTime = Date.now();
+      const { stderr } = await execAsync(
         `nice -n 10 "${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
       );
+      const processingTime = formatSeconds((Date.now() - startTime) / 1e3);
+      const langMatch = stderr.match(/Detected language:\s*(\w+)/i);
+      const language = langMatch ? langMatch[1].toLowerCase() : "unknown";
       const whisperOutput = path2.join(srcDir, `${file.basename}.txt`);
-      const transcript = await import_fs2.promises.readFile(whisperOutput, "utf8");
+      const transcript = (await import_fs2.promises.readFile(whisperOutput, "utf8")).trim();
       await import_fs2.promises.unlink(whisperOutput);
+      const stats = {
+        fileName: file.name,
+        sizeMB,
+        duration,
+        processingTime,
+        characters: transcript.length,
+        words: transcript.split(/\s+/).filter(Boolean).length,
+        lines: transcript.split("\n").length,
+        model: whisperModel,
+        language
+      };
       const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, "");
       const doneDir = path2.join(vaultPath, inbox, "done");
       await import_fs2.promises.mkdir(doneDir, { recursive: true });
@@ -349,7 +396,7 @@ var InboxWatcher = class {
         }
       }
       const audioRef = `${inbox}/done/${doneFileName}`;
-      await this.saveSession(transcript.trim(), file.basename, date, sessions, vaultPath, { audioRef, telegramUrl });
+      await this.saveSession(transcript, file.basename, date, sessions, vaultPath, { audioRef, telegramUrl, stats });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new import_obsidian2.Notice(`[AI] Whisper error: ${message}`);
@@ -395,7 +442,8 @@ var InboxWatcher = class {
         ...opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : [],
         "---"
       ];
-      await import_fs2.promises.writeFile(srcDest, [...srcFrontmatter, "", transcript, ""].join("\n"), "utf8");
+      const statsBlock = opts.stats ? [renderStatsBlock(opts.stats), ""] : [];
+      await import_fs2.promises.writeFile(srcDest, [...srcFrontmatter, "", ...statsBlock, transcript, ""].join("\n"), "utf8");
       console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
     } else {
       const srcFrontmatter = [
@@ -517,6 +565,13 @@ async function runHealthCheck(plugin) {
     console.log(`[obsidian-ai] claude ok: ${claudeVersion}`);
   } else {
     failures.push(`claude not found at: ${plugin.settings.claudePath}`);
+  }
+  const ffprobeVersion = await checkExecutable("ffprobe");
+  if (ffprobeVersion) {
+    console.log(`[obsidian-ai] ffprobe ok: ${ffprobeVersion}`);
+  } else {
+    console.warn("[obsidian-ai] ffprobe not found \u2014 media duration will be skipped in stats");
+    new import_obsidian4.Notice("[AI] ffprobe not found \u2014 audio duration stats will be unavailable", 6e3);
   }
   const token = plugin.settings.telegramBotToken;
   const tgTarget = parseTelegramThreadUrl(plugin.settings.telegramThreadUrl);

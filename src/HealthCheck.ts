@@ -38,6 +38,14 @@ export async function runHealthCheck(plugin: ObsidianAIPlugin): Promise<void> {
     failures.push(`claude not found at: ${plugin.settings.claudePath}`);
   }
 
+  const ffprobeVersion = await checkExecutable('ffprobe');
+  if (ffprobeVersion) {
+    console.log(`[obsidian-ai] ffprobe ok: ${ffprobeVersion}`);
+  } else {
+    console.warn('[obsidian-ai] ffprobe not found — media duration will be skipped in stats');
+    new Notice('[AI] ffprobe not found — audio duration stats will be unavailable', 6000);
+  }
+
   const token = plugin.settings.telegramBotToken;
   const tgTarget = parseTelegramThreadUrl(plugin.settings.telegramThreadUrl);
   if (token && tgTarget) {
