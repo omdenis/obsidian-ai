@@ -5,7 +5,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import type ObsidianAIPlugin from './main';
 import { sendFileToTelegram, parseTelegramThreadUrl } from './TelegramService';
-import { formatTranscript } from './ClaudeFormatter';
+import { formatTranscript, generateTitle, generateTags } from './ClaudeFormatter';
 
 const execAsync = promisify(exec);
 
@@ -269,14 +269,20 @@ export class InboxWatcher {
       await fs.writeFile(srcDest, [...srcFrontmatter, '', existing.trim(), ''].join('\n'), 'utf8');
     }
 
-    // Format with Claude
+    // Format with Claude and generate title
     const claudePath = this.plugin.settings.claudePath;
     let body = transcript;
+    let title = basename;
+    let tags = ['session'];
     if (claudePath) {
       try {
         new Notice(`[AI] Formatting with Claude...`);
         body = await formatTranscript(claudePath, body);
-        console.log(`[obsidian-ai] Formatted: ${date}-${basename}.md`);
+        [title, tags] = await Promise.all([
+          generateTitle(claudePath, body, date),
+          generateTags(claudePath, body),
+        ]);
+        console.log(`[obsidian-ai] Title: ${title}, Tags: ${tags.join(', ')}`);
       } catch (fmtErr) {
         const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
         new Notice(`[AI] Claude format failed: ${msg}`);
@@ -286,19 +292,19 @@ export class InboxWatcher {
 
     // Write final session MD
     await fs.mkdir(path.join(vaultPath, sessions), { recursive: true });
-    const finalOutput = path.join(vaultPath, sessions, `${date}-${basename}.md`);
+    const finalOutput = path.join(vaultPath, sessions, `${date} ${title}.md`);
     const frontmatter = [
       '---',
       `created: ${date}`,
       `type: session`,
-      `tags: [session]`,
+      `tags: [${tags.join(', ')}]`,
       ...(opts.audioRef ? [`audio: "[[${opts.audioRef}]]"`] : []),
       `transcript: "[[${srcFilePath}]]"`,
       ...(opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : []),
       '---',
     ];
     await fs.writeFile(finalOutput, [...frontmatter, '', body, ''].join('\n'), 'utf8');
-    console.log(`[obsidian-ai] Saved: ${date}-${basename}.md`);
-    new Notice(`[AI] Done: ${date}-${basename}.md`);
+    console.log(`[obsidian-ai] Saved: ${date} ${title}.md`);
+    new Notice(`[AI] Done: ${date}-${title}.md`);
   }
 }

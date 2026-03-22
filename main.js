@@ -231,9 +231,18 @@ Rules:
 - Output only the formatted body text, no preamble, no commentary
 
 Transcript to format:`;
-function formatTranscript(claudePath, rawText) {
+var TITLE_PROMPT = `Given the following text, output a concise 3-5 word title that captures the main topic.
+
+Rules:
+- Use plain lowercase words, no punctuation
+- No articles (a, an, the) unless essential
+- No quotes, colons, slashes, or special characters
+- Output only the title, nothing else
+
+Text:`;
+function runClaude(claudePath, prompt) {
   return new Promise((resolve, reject) => {
-    const child = (0, import_child_process.spawn)(claudePath, ["--print", FORMAT_PROMPT + "\n\n" + rawText], {
+    const child = (0, import_child_process.spawn)(claudePath, ["--print", prompt], {
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -248,6 +257,27 @@ function formatTranscript(claudePath, rawText) {
         resolve(stdout.trim());
     });
   });
+}
+async function generateTitle(claudePath, text, date) {
+  const raw = await runClaude(claudePath, TITLE_PROMPT + "\n\n" + text.slice(0, 2e3));
+  const sanitized = raw.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+  return sanitized || date;
+}
+var TAGS_PROMPT = `Given the following text, output 3-5 single-word tags that describe the main topics.
+
+Rules:
+- Each tag must be exactly one word, lowercase
+- No punctuation, numbers, or special characters
+- Output only the tags separated by spaces, nothing else
+
+Text:`;
+async function generateTags(claudePath, text) {
+  const raw = await runClaude(claudePath, TAGS_PROMPT + "\n\n" + text.slice(0, 2e3));
+  const tags = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/).filter((t) => t.length > 0).slice(0, 5);
+  return ["session", ...tags.filter((t) => t !== "session")];
+}
+function formatTranscript(claudePath, rawText) {
+  return runClaude(claudePath, FORMAT_PROMPT + "\n\n" + rawText);
 }
 
 // src/InboxWatcher.ts
@@ -457,11 +487,17 @@ var InboxWatcher = class {
     }
     const claudePath = this.plugin.settings.claudePath;
     let body = transcript;
+    let title = basename2;
+    let tags = ["session"];
     if (claudePath) {
       try {
         new import_obsidian2.Notice(`[AI] Formatting with Claude...`);
         body = await formatTranscript(claudePath, body);
-        console.log(`[obsidian-ai] Formatted: ${date}-${basename2}.md`);
+        [title, tags] = await Promise.all([
+          generateTitle(claudePath, body, date),
+          generateTags(claudePath, body)
+        ]);
+        console.log(`[obsidian-ai] Title: ${title}, Tags: ${tags.join(", ")}`);
       } catch (fmtErr) {
         const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
         new import_obsidian2.Notice(`[AI] Claude format failed: ${msg}`);
@@ -469,20 +505,20 @@ var InboxWatcher = class {
       }
     }
     await import_fs2.promises.mkdir(path2.join(vaultPath, sessions), { recursive: true });
-    const finalOutput = path2.join(vaultPath, sessions, `${date}-${basename2}.md`);
+    const finalOutput = path2.join(vaultPath, sessions, `${date} ${title}.md`);
     const frontmatter = [
       "---",
       `created: ${date}`,
       `type: session`,
-      `tags: [session]`,
+      `tags: [${tags.join(", ")}]`,
       ...opts.audioRef ? [`audio: "[[${opts.audioRef}]]"`] : [],
       `transcript: "[[${srcFilePath}]]"`,
       ...opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : [],
       "---"
     ];
     await import_fs2.promises.writeFile(finalOutput, [...frontmatter, "", body, ""].join("\n"), "utf8");
-    console.log(`[obsidian-ai] Saved: ${date}-${basename2}.md`);
-    new import_obsidian2.Notice(`[AI] Done: ${date}-${basename2}.md`);
+    console.log(`[obsidian-ai] Saved: ${date} ${title}.md`);
+    new import_obsidian2.Notice(`[AI] Done: ${date}-${title}.md`);
   }
 };
 
