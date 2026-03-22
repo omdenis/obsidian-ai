@@ -269,7 +269,10 @@ var InboxWatcher = class {
     );
   }
   enqueue(file) {
-    if (!this.isAudioFile(file) || !this.isDirectlyInInbox(file))
+    const inInbox = this.isDirectlyInInbox(file);
+    if (!inInbox)
+      return;
+    if (!this.isAudioFile(file) && file.extension.toLowerCase() !== "md")
       return;
     this.queue.push(file);
     if (!this.processing)
@@ -283,7 +286,11 @@ var InboxWatcher = class {
     this.processing = true;
     const file = this.queue.shift();
     try {
-      await this.handleNewFile(file);
+      if (this.isAudioFile(file)) {
+        await this.handleAudioFile(file);
+      } else {
+        await this.handleMdFile(file);
+      }
     } catch (err) {
       console.error("[obsidian-ai]", err);
     }
@@ -303,7 +310,7 @@ var InboxWatcher = class {
     }
     throw new Error("FileSystemAdapter not available");
   }
-  async handleNewFile(file) {
+  async handleAudioFile(file) {
     const vaultPath = this.getVaultPath();
     const audioPath = path2.join(vaultPath, file.path);
     const date = new Date().toISOString().slice(0, 10);
@@ -313,10 +320,9 @@ var InboxWatcher = class {
     new import_obsidian2.Notice(`[AI] Transcribing: ${file.name}...`);
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
     try {
-      const model = this.plugin.settings.whisperModel;
-      const whisper = this.plugin.settings.whisperPath;
+      const { whisperPath, whisperModel } = this.plugin.settings;
       await execAsync(
-        `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${srcDir}" --output_format txt`
+        `nice -n 10 "${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
       );
       const whisperOutput = path2.join(srcDir, `${file.basename}.txt`);
       const transcript = await import_fs2.promises.readFile(whisperOutput, "utf8");
@@ -342,53 +348,93 @@ var InboxWatcher = class {
           console.error("[obsidian-ai] Telegram error:", tgErr);
         }
       }
-      const srcFileName = `${date}-${file.basename}-src.md`;
-      const srcFilePath = `${sessions}/src/${srcFileName}`;
-      const doneFilePath = `${inbox}/done/${doneFileName}`;
-      const srcFrontmatter = [
-        "---",
-        `created: ${date}`,
-        `type: session-src`,
-        `audio: "[[${doneFilePath}]]"`,
-        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
-        "---"
-      ];
-      await import_fs2.promises.writeFile(path2.join(srcDir, srcFileName), [...srcFrontmatter, "", transcript.trim(), ""].join("\n"), "utf8");
-      console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
-      const baseName = `${date}-${file.basename}`;
-      const finalOutput = path2.join(vaultPath, sessions, `${baseName}.md`);
-      await import_fs2.promises.mkdir(path2.join(vaultPath, sessions), { recursive: true });
-      const claudePath = this.plugin.settings.claudePath;
-      let body = transcript.trim();
-      if (claudePath) {
-        try {
-          new import_obsidian2.Notice(`[AI] Formatting with Claude...`);
-          body = await formatTranscript(claudePath, body);
-          console.log(`[obsidian-ai] Formatted: ${baseName}.md`);
-        } catch (fmtErr) {
-          const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
-          new import_obsidian2.Notice(`[AI] Claude format failed: ${msg}`);
-          console.error("[obsidian-ai] Claude format error:", fmtErr);
-        }
-      }
-      const frontmatter = [
-        "---",
-        `created: ${date}`,
-        `type: session`,
-        `tags: [session]`,
-        `audio: "[[${doneFilePath}]]"`,
-        `transcript: "[[${srcFilePath}]]"`,
-        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
-        "---"
-      ];
-      await import_fs2.promises.writeFile(finalOutput, [...frontmatter, "", body, ""].join("\n"), "utf8");
-      console.log(`[obsidian-ai] Saved: ${baseName}.md`);
-      new import_obsidian2.Notice(`[AI] Done: ${baseName}.md`);
+      const audioRef = `${inbox}/done/${doneFileName}`;
+      await this.saveSession(transcript.trim(), file.basename, date, sessions, vaultPath, { audioRef, telegramUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       new import_obsidian2.Notice(`[AI] Whisper error: ${message}`);
       console.error("[obsidian-ai] Whisper error:", err);
     }
+  }
+  async handleMdFile(file) {
+    const vaultPath = this.getVaultPath();
+    const filePath = path2.join(vaultPath, file.path);
+    const date = new Date().toISOString().slice(0, 10);
+    const sessions = this.plugin.settings.sessionsFolder;
+    const srcDir = path2.join(vaultPath, sessions, "src");
+    await import_fs2.promises.mkdir(srcDir, { recursive: true });
+    new import_obsidian2.Notice(`[AI] Processing: ${file.name}...`);
+    console.log(`[obsidian-ai] Processing MD: ${file.path}`);
+    try {
+      const raw = await import_fs2.promises.readFile(filePath, "utf8");
+      const fmMatch = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+      const transcript = (fmMatch ? fmMatch[1] : raw).trim();
+      const srcFileName = `${date}-${file.basename}-src.md`;
+      const destPath = path2.join(srcDir, srcFileName);
+      await import_fs2.promises.rename(filePath, destPath);
+      console.log(`[obsidian-ai] Moved to src: ${srcFileName}`);
+      await this.saveSession(transcript, file.basename, date, sessions, vaultPath, {});
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      new import_obsidian2.Notice(`[AI] MD processing error: ${message}`);
+      console.error("[obsidian-ai] MD error:", err);
+    }
+  }
+  async saveSession(transcript, basename2, date, sessions, vaultPath, opts) {
+    const srcDir = path2.join(vaultPath, sessions, "src");
+    const srcFileName = `${date}-${basename2}-src.md`;
+    const srcFilePath = `${sessions}/src/${srcFileName}`;
+    const srcDest = path2.join(srcDir, srcFileName);
+    const srcExists = await import_fs2.promises.access(srcDest).then(() => true).catch(() => false);
+    if (!srcExists) {
+      const srcFrontmatter = [
+        "---",
+        `created: ${date}`,
+        `type: session-src`,
+        ...opts.audioRef ? [`audio: "[[${opts.audioRef}]]"`] : [],
+        ...opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : [],
+        "---"
+      ];
+      await import_fs2.promises.writeFile(srcDest, [...srcFrontmatter, "", transcript, ""].join("\n"), "utf8");
+      console.log(`[obsidian-ai] Saved src: ${srcFileName}`);
+    } else {
+      const srcFrontmatter = [
+        "---",
+        `created: ${date}`,
+        `type: session-src`,
+        "---"
+      ];
+      const existing = await import_fs2.promises.readFile(srcDest, "utf8");
+      await import_fs2.promises.writeFile(srcDest, [...srcFrontmatter, "", existing.trim(), ""].join("\n"), "utf8");
+    }
+    const claudePath = this.plugin.settings.claudePath;
+    let body = transcript;
+    if (claudePath) {
+      try {
+        new import_obsidian2.Notice(`[AI] Formatting with Claude...`);
+        body = await formatTranscript(claudePath, body);
+        console.log(`[obsidian-ai] Formatted: ${date}-${basename2}.md`);
+      } catch (fmtErr) {
+        const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
+        new import_obsidian2.Notice(`[AI] Claude format failed: ${msg}`);
+        console.error("[obsidian-ai] Claude format error:", fmtErr);
+      }
+    }
+    await import_fs2.promises.mkdir(path2.join(vaultPath, sessions), { recursive: true });
+    const finalOutput = path2.join(vaultPath, sessions, `${date}-${basename2}.md`);
+    const frontmatter = [
+      "---",
+      `created: ${date}`,
+      `type: session`,
+      `tags: [session]`,
+      ...opts.audioRef ? [`audio: "[[${opts.audioRef}]]"`] : [],
+      `transcript: "[[${srcFilePath}]]"`,
+      ...opts.telegramUrl ? [`telegram: "${opts.telegramUrl}"`] : [],
+      "---"
+    ];
+    await import_fs2.promises.writeFile(finalOutput, [...frontmatter, "", body, ""].join("\n"), "utf8");
+    console.log(`[obsidian-ai] Saved: ${date}-${basename2}.md`);
+    new import_obsidian2.Notice(`[AI] Done: ${date}-${basename2}.md`);
   }
 };
 
