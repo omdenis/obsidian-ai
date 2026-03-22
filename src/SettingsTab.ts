@@ -65,5 +65,31 @@ export class ObsidianAISettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName('Telegram bot token')
+      .setDesc('Bot API token from @BotFather')
+      .addText(text =>
+        text
+          .setPlaceholder('123456:ABC-DEF...')
+          .setValue(this.plugin.settings.telegramBotToken)
+          .onChange(async value => {
+            this.plugin.settings.telegramBotToken = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Telegram thread URL')
+      .setDesc('Paste any message link from the target thread (e.g. https://t.me/c/1449070803/3816/3817). Bot token is read from TELEGRAM_BOT_TOKEN env var.')
+      .addText(text =>
+        text
+          .setPlaceholder('https://t.me/c/1449070803/3816/3817')
+          .setValue(this.plugin.settings.telegramThreadUrl)
+          .onChange(async value => {
+            this.plugin.settings.telegramThreadUrl = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }

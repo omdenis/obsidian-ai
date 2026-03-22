@@ -41,7 +41,9 @@ var DEFAULT_SETTINGS = {
   inboxFolder: "inbox",
   sessionsFolder: "sessions",
   whisperModel: "turbo",
-  whisperPath: "/home/denis/.local/bin/whisper"
+  whisperPath: "whisper",
+  telegramThreadUrl: "",
+  telegramBotToken: ""
 };
 
 // src/SettingsTab.ts
@@ -79,38 +81,153 @@ var ObsidianAISettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
+    new import_obsidian.Setting(containerEl).setName("Telegram bot token").setDesc("Bot API token from @BotFather").addText(
+      (text) => text.setPlaceholder("123456:ABC-DEF...").setValue(this.plugin.settings.telegramBotToken).onChange(async (value) => {
+        this.plugin.settings.telegramBotToken = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Telegram thread URL").setDesc("Paste any message link from the target thread (e.g. https://t.me/c/1449070803/3816/3817). Bot token is read from TELEGRAM_BOT_TOKEN env var.").addText(
+      (text) => text.setPlaceholder("https://t.me/c/1449070803/3816/3817").setValue(this.plugin.settings.telegramThreadUrl).onChange(async (value) => {
+        this.plugin.settings.telegramThreadUrl = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
   }
 };
 
 // src/InboxWatcher.ts
 var import_obsidian2 = require("obsidian");
 var import_child_process = require("child_process");
-var import_fs = require("fs");
-var path = __toESM(require("path"));
+var import_fs2 = require("fs");
+var path2 = __toESM(require("path"));
 var import_util = require("util");
+
+// src/TelegramService.ts
+var import_fs = require("fs");
+var https = __toESM(require("https"));
+var path = __toESM(require("path"));
+function parseTelegramThreadUrl(url) {
+  const match = url.match(/t\.me\/c\/(\d+)\/(\d+)(?:\/\d+)?/);
+  if (!match)
+    return null;
+  return {
+    chatId: `-100${match[1]}`,
+    threadId: match[2]
+  };
+}
+async function sendFileToTelegram(token, chatId, threadId, filePath) {
+  const fileBuffer = await import_fs.promises.readFile(filePath);
+  const fileName = path.basename(filePath);
+  const boundary = `----FormBoundary${Date.now()}`;
+  const parts = [];
+  parts.push(Buffer.from(
+    `--${boundary}\r
+Content-Disposition: form-data; name="chat_id"\r
+\r
+${chatId}\r
+`
+  ));
+  if (threadId) {
+    parts.push(Buffer.from(
+      `--${boundary}\r
+Content-Disposition: form-data; name="message_thread_id"\r
+\r
+${threadId}\r
+`
+    ));
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r
+Content-Disposition: form-data; name="document"; filename="${fileName}"\r
+Content-Type: application/octet-stream\r
+\r
+`
+  ));
+  parts.push(fileBuffer);
+  parts.push(Buffer.from(`\r
+--${boundary}--\r
+`));
+  const body = Buffer.concat(parts);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.telegram.org",
+      path: `/bot${token}/sendDocument`,
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": body.length
+      }
+    }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          if (!json.ok) {
+            reject(new Error(`Telegram API error: ${json.description}`));
+            return;
+          }
+          const messageId = json.result.message_id;
+          const numericId = chatId.replace(/^-100/, "");
+          const url = threadId ? `https://t.me/c/${numericId}/${threadId}/${messageId}` : `https://t.me/c/${numericId}/${messageId}`;
+          resolve(url);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// src/InboxWatcher.ts
 var execAsync = (0, import_util.promisify)(import_child_process.exec);
-var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac"]);
+var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set(["mp3", "m4a", "wav", "ogg", "flac", "webm", "aac", "mp4"]);
 var InboxWatcher = class {
   constructor(plugin) {
+    this.queue = [];
+    this.processing = false;
     this.plugin = plugin;
   }
   register() {
     this.plugin.registerEvent(
       this.plugin.app.vault.on("create", (file) => {
         if (file instanceof import_obsidian2.TFile) {
-          this.handleNewFile(file).catch(
-            (err) => console.error("[obsidian-ai]", err)
-          );
+          this.enqueue(file);
         }
       })
     );
   }
+  enqueue(file) {
+    if (!this.isAudioFile(file) || !this.isDirectlyInInbox(file))
+      return;
+    this.queue.push(file);
+    if (!this.processing)
+      this.processNext();
+  }
+  async processNext() {
+    if (this.queue.length === 0) {
+      this.processing = false;
+      return;
+    }
+    this.processing = true;
+    const file = this.queue.shift();
+    try {
+      await this.handleNewFile(file);
+    } catch (err) {
+      console.error("[obsidian-ai]", err);
+    }
+    this.processNext();
+  }
   isAudioFile(file) {
     return AUDIO_EXTENSIONS.has(file.extension.toLowerCase());
   }
-  isInInbox(file) {
+  isDirectlyInInbox(file) {
     const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, "");
-    return file.path.startsWith(inbox + "/");
+    return path2.dirname(file.path) === inbox;
   }
   getVaultPath() {
     const adapter = this.plugin.app.vault.adapter;
@@ -120,13 +237,11 @@ var InboxWatcher = class {
     throw new Error("FileSystemAdapter not available");
   }
   async handleNewFile(file) {
-    if (!this.isAudioFile(file) || !this.isInInbox(file))
-      return;
     const vaultPath = this.getVaultPath();
-    const audioPath = path.join(vaultPath, file.path);
+    const audioPath = path2.join(vaultPath, file.path);
     const date = new Date().toISOString().slice(0, 10);
-    const outputDir = path.join(vaultPath, this.plugin.settings.sessionsFolder, "src");
-    await import_fs.promises.mkdir(outputDir, { recursive: true });
+    const outputDir = path2.join(vaultPath, this.plugin.settings.sessionsFolder, "src");
+    await import_fs2.promises.mkdir(outputDir, { recursive: true });
     new import_obsidian2.Notice(`[AI] Transcribing: ${file.name}...`);
     console.log(`[obsidian-ai] Transcribing: ${file.path}`);
     try {
@@ -135,20 +250,41 @@ var InboxWatcher = class {
       await execAsync(
         `nice -n 10 "${whisper}" "${audioPath}" --model ${model} --output_dir "${outputDir}" --output_format txt`
       );
-      const whisperOutput = path.join(outputDir, `${file.basename}.txt`);
-      const finalOutput = path.join(outputDir, `${date}-${file.basename}.md`);
-      const transcript = await import_fs.promises.readFile(whisperOutput, "utf8");
-      const content = [
+      const whisperOutput = path2.join(outputDir, `${file.basename}.txt`);
+      const finalOutput = path2.join(outputDir, `${date}-${file.basename}.md`);
+      const transcript = await import_fs2.promises.readFile(whisperOutput, "utf8");
+      await import_fs2.promises.unlink(whisperOutput);
+      const inbox = this.plugin.settings.inboxFolder.replace(/\/$/, "");
+      const doneDir = path2.join(vaultPath, inbox, "done");
+      await import_fs2.promises.mkdir(doneDir, { recursive: true });
+      const doneFileName = `${date}-${file.name}`;
+      const donePath = path2.join(doneDir, doneFileName);
+      await import_fs2.promises.rename(audioPath, donePath);
+      console.log(`[obsidian-ai] Moved to done: ${doneFileName}`);
+      let telegramUrl;
+      const token = this.plugin.settings.telegramBotToken;
+      const tgTarget = parseTelegramThreadUrl(this.plugin.settings.telegramThreadUrl);
+      if (token && tgTarget) {
+        try {
+          telegramUrl = await sendFileToTelegram(token, tgTarget.chatId, tgTarget.threadId, donePath);
+          new import_obsidian2.Notice(`[AI] Uploaded to Telegram: ${doneFileName}`);
+          console.log(`[obsidian-ai] Telegram message: ${telegramUrl}`);
+        } catch (tgErr) {
+          const msg = tgErr instanceof Error ? tgErr.message : String(tgErr);
+          new import_obsidian2.Notice(`[AI] Telegram upload failed: ${msg}`);
+          console.error("[obsidian-ai] Telegram error:", tgErr);
+        }
+      }
+      const doneFilePath = `${inbox}/done/${doneFileName}`;
+      const frontmatter = [
         "---",
         `created: ${date}`,
-        `source: "[[${file.path}]]"`,
-        "---",
-        "",
-        transcript.trim(),
-        ""
-      ].join("\n");
-      await import_fs.promises.writeFile(finalOutput, content, "utf8");
-      await import_fs.promises.unlink(whisperOutput);
+        `source: "[[${doneFilePath}]]"`,
+        ...telegramUrl ? [`telegram: "${telegramUrl}"`] : [],
+        "---"
+      ];
+      const content = [...frontmatter, "", transcript.trim(), ""].join("\n");
+      await import_fs2.promises.writeFile(finalOutput, content, "utf8");
       new import_obsidian2.Notice(`[AI] Done: ${date}-${file.basename}.md`);
       console.log(`[obsidian-ai] Saved: ${finalOutput}`);
     } catch (err) {
@@ -180,11 +316,11 @@ var ClaudeLauncher = class {
   }
   launch() {
     const { spawn, execSync } = require("child_process");
-    const fs2 = require("fs");
-    const path2 = require("path");
+    const fs3 = require("fs");
+    const path3 = require("path");
     const vaultPath = this.plugin.app.vault.adapter.basePath;
-    const claudeMdPath = path2.join(vaultPath, "CLAUDE.md");
-    const hasClaudeMd = fs2.existsSync(claudeMdPath);
+    const claudeMdPath = path3.join(vaultPath, "CLAUDE.md");
+    const hasClaudeMd = fs3.existsSync(claudeMdPath);
     const claudeCmd = hasClaudeMd ? "claude" : "claude /init";
     const terminal = TERMINALS.find((t) => {
       try {
@@ -210,10 +346,16 @@ var ClaudeLauncher = class {
 // src/main.ts
 var ObsidianAIPlugin = class extends import_obsidian4.Plugin {
   async onload() {
-    await this.loadSettings();
-    this.addSettingTab(new ObsidianAISettingTab(this.app, this));
-    new InboxWatcher(this).register();
-    new ClaudeLauncher(this).register();
+    try {
+      await this.loadSettings();
+      this.addSettingTab(new ObsidianAISettingTab(this.app, this));
+      new InboxWatcher(this).register();
+      new ClaudeLauncher(this).register();
+    } catch (err) {
+      console.error("[obsidian-ai] onload error:", err);
+      new import_obsidian4.Notice(`[obsidian-ai] Failed to load: ${err}`);
+      return;
+    }
     this.addCommand({
       id: "test-plugin",
       name: "Test: show plugin status",
