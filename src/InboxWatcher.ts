@@ -140,7 +140,7 @@ export class InboxWatcher {
       // Run whisper, measure processing time
       const startTime = Date.now();
       const { stderr } = await execAsync(
-        `nice -n 10 "${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
+        `"${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
       );
       const processingTime = formatSeconds((Date.now() - startTime) / 1000);
 

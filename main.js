@@ -240,6 +240,14 @@ Rules:
 - Output only the title, nothing else
 
 Text:`;
+var TAGS_PROMPT = `Given the following text, output 3-5 single-word tags that describe the main topics.
+
+Rules:
+- Each tag must be exactly one word, lowercase
+- No punctuation, numbers, or special characters
+- Output only the tags separated by spaces, nothing else
+
+Text:`;
 function runClaude(claudePath, prompt) {
   return new Promise((resolve, reject) => {
     const child = (0, import_child_process.spawn)(claudePath, ["--print", prompt], {
@@ -263,14 +271,6 @@ async function generateTitle(claudePath, text, date) {
   const sanitized = raw.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
   return sanitized || date;
 }
-var TAGS_PROMPT = `Given the following text, output 3-5 single-word tags that describe the main topics.
-
-Rules:
-- Each tag must be exactly one word, lowercase
-- No punctuation, numbers, or special characters
-- Output only the tags separated by spaces, nothing else
-
-Text:`;
 async function generateTags(claudePath, text) {
   const raw = await runClaude(claudePath, TAGS_PROMPT + "\n\n" + text.slice(0, 2e3));
   const tags = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/).filter((t) => t.length > 0).slice(0, 5);
@@ -385,7 +385,7 @@ var InboxWatcher = class {
       const duration = await getMediaDuration(audioPath);
       const startTime = Date.now();
       const { stderr } = await execAsync(
-        `nice -n 10 "${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
+        `"${whisperPath}" "${audioPath}" --model ${whisperModel} --output_dir "${srcDir}" --output_format txt`
       );
       const processingTime = formatSeconds((Date.now() - startTime) / 1e3);
       const langMatch = stderr.match(/Detected language:\s*(\w+)/i);
